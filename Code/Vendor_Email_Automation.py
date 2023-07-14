@@ -1,5 +1,13 @@
 """
 French Compliance Email Automation,  06/07/2023, Ryan Buzar
+Python 3.11.3
+Uses the following libraries:
+- pandas
+- snowflake.connector
+- datetime
+- win32com.client
+- time
+- openpyxl
 
 Classes:
 :Vendor:
@@ -53,7 +61,12 @@ Classes:
 
 Global Variables:
     last_to_list: A list of the last recipients an email was sent to. 
-
+    skipped_vendors: List of vendors that were skipped and why.
+    duplicates: Counter of duplicate vendor contacts skipped.
+    sbu_errors: counter of SBU errors skipped.
+    successful: counter of successful emails sent.
+    total: counter of all records processed.
+    
 Functions:
     :get_all_data: Queries the applicable snowflake tables to retrieve vendor codes, vendor names, contacts,
         contact email addresses, the CS, and the product director name and email address. Places this info into a 
@@ -63,7 +76,9 @@ Functions:
 
     :sf_connection: Opens the connection with snowflake, authenticates, executes the query, and then closes 
         the connection.
-
+        
+    :error_log: Takes a list of errors and outputs an excel workbook for user review later.
+    
 Program Function:
     Will pull all vendors from  Snowflake that have a french compliance status that is considered non-compliant
         along with all applicable contacts listed for the vendor and their information. Also pulls all applicable 
@@ -81,13 +96,24 @@ import snowflake.connector as sc
 from datetime import date
 import win32com.client
 import time
+from openpyxl import Workbook
 
 # Mark the start of processing time for the program.
 st = time.time()
 
 # Used by create_email to tell if the current email list is a duplicate of the previous. 
-global last_to_list
+# List of Vendor contacts contacted
 last_to_list = []
+# List of vendors that were skipped and why
+skipped_vendors = [('VENDOR_ID', 'REASON')]
+# counter of duplicate vendor contacts skipped
+duplicates = 0
+# counter of SBU errors skipped
+sbu_errors = 0
+# counter of successful emails sent
+successful = 0
+# counter of all records processed
+total = 0
 
 
 class Vendor(object):
@@ -132,9 +158,12 @@ class French_Vendor(Vendor):
         # pull a query from the french_master for this vendor
         # and assign the frenchcomp status to this vendor.
         self.cs = self.data.iloc[0]['CS']
-        prod_dir = {self.data.iloc[0]['CS_LASTNAME'] + ', ' + 
-                    self.data.iloc[0]['CS_FIRSTNAME']: 
-                    self.data.iloc[0]['CS_EMAIL']}
+        if self.data.iloc[0]['CS_LASTNAME'] is None:
+            prod_dir = {}
+        else:
+            prod_dir = {self.data.iloc[0]['CS_LASTNAME'] + ', ' + 
+                        self.data.iloc[0]['CS_FIRSTNAME']: 
+                        self.data.iloc[0]['CS_EMAIL']}
         
         # Add the product_director to the cs_team dictionary
         self.cs_team.update(prod_dir)
@@ -185,76 +214,92 @@ class French_Vendor(Vendor):
         # Creates a "To" and "Cc" list, then Creates an outlook email to the vendor.
 
         # Create a "to list" from the dataframe without duplicates      
-        to_list = self.vendor_contacts.values()
-        for i in to_list:
-            global last_to_list
-            # If any of the Vendor contacts were in the previous email, skip to the
-            # next vendor
-            if i in last_to_list:
-                print("Vendor was contacted previously. Skipping.")
-                continue
-            else:
-                # Update the previous contact list.
-                last_to_list = [i for i in to_list]
+        to_list = list(self.vendor_contacts.values())
+        # Define a "CC" list
+        cc_list = self.cs_team.values()
 
-                # Place a semi-colon on the end of every email address entry
-                semi_colons_vnd = [x + '; ' for x in to_list]
-                to_w_sc = ''.join(semi_colons_vnd)
+        global last_to_list
+        # Checks if any recipients in the current "To" list are in the "last_to_list",
+        # a list of all recipients emailed thus far. If there is a duplicate recipient
+        # the vendor is skipped, the vendor_id and reason is logged to skipped_vendors,
+        # and the duplicates counter is incremented by one. 
+        # The vendor is checked if there is an CS listed, if there is not, the vendor 
+        # is skipped, the vendor_id and reason is logged to skipped_vendors, and the 
+        # sbu_error counter is incremented by one.
+        if any(recipient in last_to_list for recipient in to_list):
+            skipped_vendors.append((self.vendor_id, 'Duplicate Recipients'))
+            global duplicates
+            duplicates += 1
+            if not self.sbu_team:
+                skipped_vendors.append((self.vendor_id, 'Unrecognized SBU'))
+                global sbu_errors
+                sbu_errors += 1
+            print("Vendor was contacted previously. Skipping.")
+            return
 
-                # Define a "CC" list
-                cc_list = self.cs_team.values()
-                # Place a semi-colon on the end of every email address entry
-                semi_colons_cs = [x + '; ' for x in cc_list]
-                cc_w_sc = ''.join(semi_colons_cs) 
+        # Update the last_to_list with the current "To" list recipients.
+        last_to_list.extend(to_list)
 
-                #Define the network directory of the  PAckaging Guidelines (as a raw string)
-                dir_name = r'C:/Users/User.User/Downloads/Packaging Guidelines.pdf'
 
-                # Create an email, fill out the "To", "CC", "Subject" and email body, and insert the attachemnt.
-                outlook = win32com.client.Dispatch("Outlook.Application")
-                MAIl = outlook.CreateItem(0)
-                MAIl.To = str(to_w_sc)
-                MAIl.CC = str(cc_w_sc)
-                MAIl.Subject = f"""Retail Packaging Requirements for Compliance with the Charter 
-                                   of French Language - {self.name} {self.vendor_id}"""
-                MAIl.HTMLBody = f"""
-                    Good afternoon,<br><br>
-                    You were recently notified with the below details about updated Aftermarket Packaging 
-                    Guidelines related to retail packaging requirements. <br><br> 
-                    Your compliance with the Charter of French Language requires your immediate attention, 
-                    as this is a legal requirement to do business in Quebec.  These requirements include 
-                    translating both the label and instructions/pamphlets inside of the box into French. 
-                    We are committed to complying with Quebec's legal requirements and expects 
-                    all our supplier partners to do the same.<br><br>
-                    The pertinent information for the retail packaging compliance requirements is located 
-                    online. A PDF copy is attached<br><br>
- 
-                    Aftermarket Packaging Guidelines<br>
-                    *As an additional reminder, the Packaging Guidelines state that both the 
-                    label and instructions/pamphlets inside of the box need to include English, French 
-                    and Spanish translations.<br><br>
+        # Place a semi-colon on the end of every email address entry
+        semi_colons_vnd = [x + '; ' for x in to_list]
+        to_w_sc = ''.join(semi_colons_vnd)
+        
+        # Place a semi-colon on the end of every email address entry
+        semi_colons_sbu = [x + '; ' for x in cc_list]
+        cc_w_sc = ''.join(semi_colons_sbu) 
 
-                    Our distribution centers are infracting suppliers not in compliance with these 
-                    requirements. Infractions are debited following the normal infraction process according 
-                    to the published supplier guidelines.<br><br>
+        #Define the network directory of the PPD PAckaging Guidelines (as a raw string)
+        dir_name = r'C:/Users/User.User/Downloads/Packaging Guidelines.pdf'
 
-                    Please let me know if you have any questions.  Thank you for your continued support.
-                    """
-                # Select the non-primary email account in Outlook
-                From = None
-                for myEmailAddress in outlook.Session.Accounts:
-                    if "@gmail.com" in str(myEmailAddress):
-                        From = myEmailAddress
-                        break
+        # Create an email, fill out the "To", "CC", "Subject" and email body, and insert the attachemnt.
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        mail = outlook.CreateItem(0)
+        mail.To = str(to_w_sc)
+        mail.CC = str(cc_w_sc)
+        MAIl.Subject = f"Retail Packaging Requirements for Compliance with the Charter of French Language - {self.name} {self.vendor_id}"
+        MAIl.HTMLBody = f"""
+            Good afternoon,<br><br>
+            You were recently notified with the below details about updated Aftermarket Packaging 
+            Guidelines related to retail packaging requirements. <br><br> 
+            Your compliance with the Charter of French Language requires your immediate attention, 
+            as this is a legal requirement to do business in Quebec.  These requirements include 
+            translating both the label and instructions/pamphlets inside of the box into French. 
+            We are committed to complying with Quebec's legal requirements and expects 
+            all our supplier partners to do the same.<br><br>
+            The pertinent information for the retail packaging compliance requirements is located 
+            online. A PDF copy is attached<br><br>
 
-                if From != None:
-                    MAIl._oleobj_.Invoke(*(64209,0,8,0,From))
+            Aftermarket Packaging Guidelines<br>
+            *As an additional reminder, the Packaging Guidelines state that both the 
+            label and instructions/pamphlets inside of the box need to include English, French 
+            and Spanish translations.<br><br>
+
+            Our distribution centers are infracting suppliers not in compliance with these 
+            requirements. Infractions are debited following the normal infraction process according 
+            to the published supplier guidelines.<br><br>
+
+            Please let me know if you have any questions.  Thank you for your continued support.
+            """
+            # Select the non-primary email account in Outlook
+            From = None
+            for myEmailAddress in outlook.Session.Accounts:
+                if "@gmail.com" in str(myEmailAddress):
+                    From = myEmailAddress
+                    break
+
+            if From != None:
+                MAIl._oleobj_.Invoke(*(64209,0,8,0,From))
                 
-                # Attach the PDF to the email
-                print("Attaching PDF")
-                MAIl.Attachments.Add(Source=dir_name)
-                # Display the email before sending
-                MAIl.Display() 
+        # Attach the PDF to the email
+        print("Attaching PDF")
+        mail.Attachments.Add(Source=dir_name)
+        # Display the email before sending
+        mail.Display()
+        print("Email sent successfully!")
+        global successful
+        successful += 1
+        print("Moving to next vendor")
 
 def get_all_data():
     # SQL used to query snowflake data for Vendor ID, Vendor Name, Vendor Contact Name,
@@ -444,7 +489,7 @@ def sf_connection(sql, params=None):
     # Establish the connection with Snowflake, using browser authentication.
     # Loads sql query results at the cursor to a Pandas DataFrame.
     with sc.connect(
-                    user='user.user@company.com',
+                    user='user@company.com',
                     account='company',
                     authenticator="externalbrowser",
                     role='ANALYST',
@@ -456,6 +501,16 @@ def sf_connection(sql, params=None):
                     pd_df = pd.read_sql(sql, conn, params=params)
     return pd_df
 
+def error_log(errors):
+    # Takes a list of errors as a list object, errors, populated with tuples that have two 
+    # elements each: The vendor_id and the reason for rejection. Compiles the data and 
+    # outputs an excel workbook.
+    wb = Workbook()
+    ws = wb.active
+    for vendor_id, reason in skipped_vendors:
+        ws.append([vendor_id, reason])
+    wb.save('skipped_vendors.xlsx')
+
 if __name__ == '__main__':
     print("importing the master vendor data file")
     french_master = get_all_data()
@@ -464,11 +519,11 @@ if __name__ == '__main__':
     print("Creating vendor objects")
     vendor_dict = {french_master.iloc[i]['VENDORID']:french_master.iloc[i][ 'VNDNAM'] for i in range(len(french_master))}
     vendor_objs = [French_Vendor(k,v) for k,v in vendor_dict.items()]
-    sample_objs = vendor_objs[0:1]
-
-# When done with testing, remove sample_objs and replace with vendor_objs
-    for h, i in enumerate(sample_objs):
-        print(f"Vendor {h} of {len(sample_objs)} {(h/len(sample_objs)) * 100}% Complete")
+    #For Testing
+    sample_objs = vendor_objs[0:20] # When done with testing, remove sample_objs and replace with vendor_objs
+    
+    for h, i in enumerate(sample_objs): # When done with testing, remove sample_objs and replace with vendor_objs
+        print(f"Vendor {h} of {len(sample_objs)} {(h/len(sample_objs)) * 100}% Complete") # When done with testing, remove sample_objs and replace with vendor_objs
         print(f"Importing vendor data for {i.vendor_id}")
         i.get_data()
         print(f"Getting vendor contacts for {i.vendor_id}")
@@ -479,8 +534,8 @@ if __name__ == '__main__':
         i.get_cs_team()
         print(f"Generating emai to vendor {i.vendor_id}")
         i.create_emai()
-        print("Email sent successfully!")
-        print("Moving to next vendor")
+    error_log(skipped_vendors)
+    print(f"Processed {total} vendors\n{duplicates} duplicate vendor contacts\n{sbu_errors} SBU errors\n{successful} Vendors emailed successfully")
 
 # Mark the end of processing time for the program.
 et = time.time()
