@@ -66,6 +66,7 @@ Global Variables:
     sbu_errors: counter of SBU errors skipped.
     successful: counter of successful emails sent.
     total: counter of all records processed.
+    mapping: Map the CS business units to the product manager and product director codes.
     
 Functions:
     :get_all_data: Queries the applicable snowflake tables to retrieve vendor codes, vendor names, contacts,
@@ -114,7 +115,16 @@ sbu_errors = 0
 successful = 0
 # counter of all records processed
 total = 0
-
+# Map the product directors / CS number to their product managers and
+# product analysts.
+mapping = {
+     'D10':('B10', 'M10'), 'D11':('B11', 'M11'),
+     'D12':('B12', 'M12'), 'D14':('B14', 'M14'),
+     'D15':('B15', 'M15'), 'D16':('B16', 'M16'),
+     'D17':('B17', 'M17'), 'D18':('B18', 'M18'),
+     'D20':('B20', 'M20'), 'D21':('B21', 'M21'),
+     'D22':('B22',None), 'D99':(None, 'M99')
+}
 
 class Vendor(object):
     # Base class for the Vendor objects. Holds basic information about a vendor.
@@ -148,6 +158,9 @@ class French_Vendor(Vendor):
         self.french_status = None
         self.cs = None
         self.cs_team = {}
+        self.prod_dir = {}
+        self.prod_mgr = {}
+        self.prod_analyst = {}
 
     def get_frenchstatus(self):
         # pull a query from self.data and assign the frenchcomp status to 
@@ -159,26 +172,14 @@ class French_Vendor(Vendor):
         # and assign the frenchcomp status to this vendor.
         self.cs = self.data.iloc[0]['CS']
         if self.data.iloc[0]['CS_LASTNAME'] is None:
-            prod_dir = {}
+            self.prod_dir = {}
         else:
-            prod_dir = {self.data.iloc[0]['CS_LASTNAME'] + ', ' + 
-                        self.data.iloc[0]['CS_FIRSTNAME']: 
-                        self.data.iloc[0]['CS_EMAIL']}
+            self.prod_dir = {self.data.iloc[0]['CS_LASTNAME'] + ', ' + 
+                             self.data.iloc[0]['CS_FIRSTNAME']: 
+                             self.data.iloc[0]['CS_EMAIL']}
         
         # Add the product_director to the cs_team dictionary
-        self.cs_team.update(prod_dir)
-
-        # Map the product directors / CS number to their product managers and
-        # product analysts.
-        mapping = {
-             'D10':('B10', 'M10'), 'D11':('B11', 'M11'),
-             'D12':('B12', 'M12'), 'D14':('B14', 'M14'),
-             'D15':('B15', 'M15'), 'D16':('B16', 'M16'),
-             'D17':('B17', 'M17'), 'D18':('B18', 'M18'),
-             'D20':('B20', 'M20'), 'D21':('B21', 'M21'),
-             'D22':('B22',None), 'D99':(None, 'M99')
-        }
-
+        self.cs_team.update(self.prod_dir)
 
         if self.cs in mapping:
             # the product manager is the "B", index 0 value from mapping
@@ -190,35 +191,66 @@ class French_Vendor(Vendor):
                 pass
             else:
                 # Assign the product manager name and email to a dictionary.
-                prod_mgr = {prod_mgr_df.iloc[0]['LASTNAME'] + ', ' + 
-                            prod_mgr_df.iloc[0]['FIRSTNAME']: 
-                            prod_mgr_df.iloc[0]['EMAIL']} 
+                self.prod_mgr = {prod_mgr_df.iloc[0]['LASTNAME'] + ', ' + 
+                                 prod_mgr_df.iloc[0]['FIRSTNAME']: 
+                                 prod_mgr_df.iloc[0]['EMAIL']} 
                 # Add the product_manager to the cs_team dictionary
-                self.cs_team.update(prod_mgr)
+                self.cs_team.update(self.prod_mgr)
             # If there is no product analyst, skip to the next step.
             if mapping[self.cs][1] == None:
                  pass
             else:
                 # Assign the product analyst name and email to a dictionary.
-                prod_analyst = {prod_analyst_df.iloc[0]['LASTNAME'] + ', ' +
-                                prod_analyst_df.iloc[0]['FIRSTNAME']:
-                                prod_analyst_df.iloc[0]['EMAIL']}
+                if len(prod_analyst_df) > 1:
+                    for i in range(len(prod_analyst_df)):
+                        self.prod_analyst.update({prod_analyst_df.iloc[i]['LASTNAME'] + ', ' +
+                                             prod_analyst_df.iloc[i]['FIRSTNAME']:
+                                             prod_analyst_df.iloc[i]['EMAIL']})
+                else:
+                    self.prod_analyst = {prod_analyst_df.iloc[0]['LASTNAME'] + ', ' +
+                                         prod_analyst_df.iloc[0]['FIRSTNAME']:
+                                         prod_analyst_df.ilco[0]['EMAIL']}
                 # Add the product_analyst to the cs_team dictionary
-                self.cs_team.update(prod_analyst)
+                self.cs_team.update(self.prod_analyst)
         else:
             # If the CS is not recognized, default to a blank dictionary 
             prod_mgr = {}
             prod_analyst = {}
     
-    def create_email(self):
+def create_email(self):
         # Creates a "To" and "Cc" list, then Creates an outlook email to the vendor.
-
+        prod_analyst_df = contacts.query("JCD == '{}'".format(mapping[self.cs][1]))
         # Create a "to list" from the dataframe without duplicates      
         to_list = list(self.vendor_contacts.values())
-        # Define a "CC" list
-        cc_list = self.cs_team.values()
+        # Get the Product Analysts
+        cc_list_emails_dict = self.prod_analyst.values()
+        # Remove the tuple from df.values()
+        cc_list_emails = [x for x in cc_list_emails_dict]
+        # Blank string for pretty emails
+        cc_list_pretty_emails = ''
+        # Blank string for pretty names
+        cc_list_pretty_names = ''
+        # If there is more than one product analyst, concatenate the pretty_names and emails
+        if len(prod_analyst_df) >1:
+            for i in range(len(prod_analyst_df)):
+                cc_list_pretty_names += f"{prod_analyst_df.iloc[i]['FIRSTNAME']} {prod_analyst_df.iloc[i]['LASTNAME']} & "
+                cc_list_pretty_emails += f"{prod_analyst_df.iloc[i]['FIRSTNAME']}.{prod_analyst_df.iloc[i]['LASTNAME']}@company.com & "
+            cc_list_pretty_names = cc_list_pretty_names[:-3] # Remove the ' & ' at the end of the last analyst
+            cc_list_pretty_emails = cc_list_pretty_emails[:-3] # Remove the ' & ' at the end of the last analyst
+        else:
+            cc_list_pretty_names += f"{prod_analyst_df.iloc[0]['FIRSTNAME']} {prod_analyst_df.iloc[0]['LASTNAME']}"
+            cc_list_pretty_emails += f"{prod_analyst_df.iloc[0]['FIRSTNAME']}.{prod_analyst_df.iloc[0]['LASTNAME']}@company.com"
 
-        global last_to_list
+        #List of CS business units
+        cs_names = {
+             'D10': 'A', 'D11': 'B',
+             'D12': 'C', 'D14': 'D',
+             'D15': 'E', 'D16': 'F',
+             'D17': 'G', 'D18': 'H',
+             'D20': 'C', 'D21': 'C',
+             'D22': 'F', 'D99': 'C'
+        }
+
         # Checks if any recipients in the current "To" list are in the "last_to_list",
         # a list of all recipients emailed thus far. If there is a duplicate recipient
         # the vendor is skipped, the vendor_id and reason is logged to skipped_vendors,
@@ -226,13 +258,14 @@ class French_Vendor(Vendor):
         # The vendor is checked if there is an CS listed, if there is not, the vendor 
         # is skipped, the vendor_id and reason is logged to skipped_vendors, and the 
         # sbu_error counter is incremented by one.
+        global last_to_list
         if any(recipient in last_to_list for recipient in to_list):
             skipped_vendors.append((self.vendor_id, 'Duplicate Recipients'))
             global duplicates
             duplicates += 1
             if not self.sbu_team:
-                skipped_vendors.append((self.vendor_id, 'Unrecognized SBU'))
-                global sbu_errors
+                skipped_vendors.append((self.vendor_id, 'Unrecognized CS'))
+                global cs_errors
                 sbu_errors += 1
             print("Vendor was contacted previously. Skipping.")
             return
@@ -240,13 +273,12 @@ class French_Vendor(Vendor):
         # Update the last_to_list with the current "To" list recipients.
         last_to_list.extend(to_list)
 
-
         # Place a semi-colon on the end of every email address entry
         semi_colons_vnd = [x + '; ' for x in to_list]
         to_w_sc = ''.join(semi_colons_vnd)
         
         # Place a semi-colon on the end of every email address entry
-        semi_colons_sbu = [x + '; ' for x in cc_list]
+        semi_colons_sbu = [x + '; ' for x in cc_list_emails]
         cc_w_sc = ''.join(semi_colons_sbu) 
 
         #Define the network directory of the PPD PAckaging Guidelines (as a raw string)
@@ -257,20 +289,20 @@ class French_Vendor(Vendor):
         mail = outlook.CreateItem(0)
         mail.To = str(to_w_sc)
         mail.CC = str(cc_w_sc)
-        MAIl.Subject = f"Retail Packaging Requirements for Compliance with the Charter of French Language - {self.name} {self.vendor_id}"
+        MAIl.Subject = f"Retail Packaging Requirements for Compliance with the Charter of French Language - {self.name} {self.vendor_id} - {self.sbu}"
         MAIl.HTMLBody = f"""
             Good afternoon,<br><br>
             You were recently notified with the below details about updated Aftermarket Packaging 
             Guidelines related to retail packaging requirements. <br><br> 
-            Your compliance with the Charter of French Language requires your immediate attention, 
+            <b><u>Your compliance with the Charter of French Language requires your immediate attention, 
             as this is a legal requirement to do business in Quebec.  These requirements include 
-            translating both the label and instructions/pamphlets inside of the box into French. 
+            translating both the label and instructions/pamphlets inside of the box into French.</b></u> <br> 
             We are committed to complying with Quebec's legal requirements and expects 
             all our supplier partners to do the same.<br><br>
             The pertinent information for the retail packaging compliance requirements is located 
             online. A PDF copy is attached<br><br>
 
-            Aftermarket Packaging Guidelines<br>
+            Packaging Guidelines<br>
             *As an additional reminder, the Packaging Guidelines state that both the 
             label and instructions/pamphlets inside of the box need to include English, French 
             and Spanish translations.<br><br>
@@ -279,7 +311,10 @@ class French_Vendor(Vendor):
             requirements. Infractions are debited following the normal infraction process according 
             to the published supplier guidelines.<br><br>
 
-            Please let me know if you have any questions.  Thank you for your continued support.
+            Please let me know if you have any questions.  Thank you for your continued support.<br>
+            <b><font color='#767171'>{cc_list_pretty_names} - Product Analyst - {sbu_names[self.sbu]} 
+            | Company | Email: </font> <font color='#0563C1'></u>{cc_list_pretty_emails}</font></u></b><br>
+            <img src='C:/Users/User.User/Pictures/CompanyLogo.png' width=300 height=60>
             """
             # Select the non-primary email account in Outlook
             From = None
@@ -472,6 +507,63 @@ def get_data():
             AND LASTNAME NOT ILIKE '%s'
             AND LASTNAME NOT ILIKE '%s'
             AND LASTNAME NOT ILIKE '%s'
+            AND LASTNAME NOT ILIKE '%s'
+        UNION ALL
+            SELECT
+                'Pam' AS FIRSTNAME,
+                'Beesly" AS LASTNAME,
+                'M12' AS JCD,
+                11111 AS CNTID,
+                'Pam.Beesly@company.com' AS EMAIL
+        UNION ALL
+            SELECT
+                'Pam' AS FIRSTNAME,
+                'Beesly" AS LASTNAME,
+                'M20' AS JCD,
+                11111 AS CNTID,
+                'Pam.Beesly@company.com' AS EMAIL
+        UNION ALL
+            SELECT
+                'Pam' AS FIRSTNAME,
+                'Beesly" AS LASTNAME,
+                'M21' AS JCD,
+                11111 AS CNTID,
+                'Pam.Beesly@company.com' AS EMAIL
+        UNION ALL
+            SELECT
+                'Pam' AS FIRSTNAME,
+                'Beesly" AS LASTNAME,
+                'M99' AS JCD,
+                11111 AS CNTID,
+                'Pam.Beesly@company.com' AS EMAIL
+        UNION ALL
+            SELECT
+                'Michael' AS FIRSTNAME,
+                'Scott' AS LASTNAME,
+                'M12' AS JCD,
+                99999 AS CNTID,
+                'Michael.Scott@company.com' AS EMAIL
+        UNION ALL
+            SELECT
+                'Michael' AS FIRSTNAME,
+                'Scott' AS LASTNAME,
+                'M20' AS JCD,
+                99999 AS CNTID,
+                'Michael.Scott@company.com' AS EMAIL
+        UNION ALL
+            SELECT
+                'Michael' AS FIRSTNAME,
+                'Scott' AS LASTNAME,
+                'M21' AS JCD,
+                99999 AS CNTID,
+                'Michael.Scott@company.com' AS EMAIL
+        UNION ALL
+            SELECT
+                'Michael' AS FIRSTNAME,
+                'Scott' AS LASTNAME,
+                'M99' AS JCD,
+                99999 AS CNTID,
+                'Michael.Scott@company.com' AS EMAIL
         ORDER BY
             RIGHT(JCD,2)
             ;""" % ('company', 'WEST VIRGINIA', 'A', 'B',
@@ -479,7 +571,8 @@ def get_data():
                     'G', 'H', 'I', 'John', 
                     'ADAMS', 'ALEXANDER', 'HAMILTON', 
                     'JEFFERSON', 'PAINE', 'SMITH', 
-                    'HANCOCK', 'FRANKLIN', 'FLOYD', 'HALL'
+                    'HANCOCK', 'FRANKLIN', 'FLOYD', 'HALL',
+                    'CHASE'
                     )
     # Snowflake Connection
     contacts = sf_connection(contacts_sql)
