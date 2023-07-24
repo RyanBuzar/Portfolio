@@ -137,17 +137,51 @@ class Vendor(object):
     def get_data(self):
         # pull a query from the french_master for all contacts in this vendor
         # and store in self.data
-        self.data = french_master.query("VENDORID == @self.vendor_id")
+        vendor_data = french_master.query("VENDORID == @self.vendor_id")
+        self.data = {'VENDORID': vendor_data.iloc[0]['VENDORID'], 
+                     'VNDNAM':  vendor_data.iloc[0]['VNDNAM'],
+                     'FRENCHCOMP': vendor_data.iloc[0]['FRENCHCOMP'],
+                     'CS': vendor_data.iloc[0]['CS'],
+                     'Vendor_Contacts': {
+                                          vendor_data.iloc[i]['VND_FIRSTNAME'] +
+                                          ' ' +
+                                          vendor_data.iloc[i]['VND_LASTNAME']: {
+                                                                           'Vendor_Email': vendor_data.iloc[i]['VND_EMAIL'], 
+                                                                           'Vendor_Role': vendor_data.iloc[i]['VND_ROLEDSC']
+                                                                           } 
+                                          for i in range(len(vendor_data))
+                                          },
+                     'CS_Contacts':{
+                                     'Product_Director': {
+                                                          vendor_data.iloc[0]['PD_FIRSTNAME'] + 
+                                                          ' ' +
+                                                          vendor_data.iloc[0]['PD_LASTNAME']: 
+                                                          vendor_data.iloc[0]['PD_EMAIL']
+                                                         },
+                                     'Product_Manager': {
+                                                         vendor_data.iloc[i]['PM_FIRSTNAME'] + 
+                                                         ' ' +
+                                                         vendor_data.iloc[i]['PM_LASTNAME']:
+                                                         vendor_data.iloc[i]['PM_EMAIL']
+                                                         for i in range(len(vendor_data))
+                                                         },
+                                     'Product_Analyst': {
+                                                         vendor_data.iloc[i]['PA_FIRSTNAME'] +
+                                                         ' ' +
+                                                         vendor_data.iloc[i]['PA_LASTNAME']:
+                                                         vendor_data.iloc[i]['PA_EMAIL'] 
+                                                         for i in range(len(vendor_data))
+                                                         }
+                                     
+                                     }
+                     }
+        del vendor_data
 
     def get_vendor_contacts(self):
         # pull the vendor contacts from self.data and compile a dictionary 
         # keyed by the contact last name and first name, with the value as
         # their corresponding email address.
-        self.vendor_contacts = {self.data.iloc[i]['VND_LASTNAME'] + ", " + 
-                     self.data.iloc[i]['VND_FIRSTNAME']:
-                     self.data.iloc[i]['VND_EMAIL']
-                     for i in range(len(self.data))
-                     }
+        self.vendor_contacts = {k:v['Vendor_Email'] for k,v in self.data['Vendor_Contacts'].items()}
         
 
 class French_Vendor(Vendor):
@@ -165,61 +199,24 @@ class French_Vendor(Vendor):
     def get_frenchstatus(self):
         # pull a query from self.data and assign the frenchcomp status to 
         # this vendor.
-        self.french_status = self.data.iloc[0]['FRENCHCOMP']
+        self.french_status = self.data['FRENCHCOMP']
 
-    def get_cs_team(self):
+    def get_CS_team(self):
         # pull a query from the french_master for this vendor
-        # and assign the frenchcomp status to this vendor.
-        self.cs = self.data.iloc[0]['CS']
-        if self.data.iloc[0]['CS_LASTNAME'] is None:
-            self.prod_dir = {}
-        else:
-            self.prod_dir = {self.data.iloc[0]['CS_LASTNAME'] + ', ' + 
-                             self.data.iloc[0]['CS_FIRSTNAME']: 
-                             self.data.iloc[0]['CS_EMAIL']}
-        
-        # Add the product_director to the cs_team dictionary
-        self.cs_team.update(self.prod_dir)
-
-        if self.cs in mapping:
-            # the product manager is the "B", index 0 value from mapping
-            prod_mgr_df = contacts.query("JCD == '{}'".format(mapping[self.cs][0]))
-            # the product analyst is the "M", index 1 value from mapping
-            prod_analyst_df = contacts.query("JCD == '{}'".format(mapping[self.cs][1]))
-            # If there is not a product manager, skip to the next step.
-            if mapping[self.cs][0] == None:
-                pass
-            else:
-                # Assign the product manager name and email to a dictionary.
-                self.prod_mgr = {prod_mgr_df.iloc[0]['LASTNAME'] + ', ' + 
-                                 prod_mgr_df.iloc[0]['FIRSTNAME']: 
-                                 prod_mgr_df.iloc[0]['EMAIL']} 
-                # Add the product_manager to the cs_team dictionary
-                self.cs_team.update(self.prod_mgr)
-            # If there is no product analyst, skip to the next step.
-            if mapping[self.cs][1] == None:
-                 pass
-            else:
-                # Assign the product analyst name and email to a dictionary.
-                if len(prod_analyst_df) > 1:
-                    for i in range(len(prod_analyst_df)):
-                        self.prod_analyst.update({prod_analyst_df.iloc[i]['LASTNAME'] + ', ' +
-                                             prod_analyst_df.iloc[i]['FIRSTNAME']:
-                                             prod_analyst_df.iloc[i]['EMAIL']})
-                else:
-                    self.prod_analyst = {prod_analyst_df.iloc[0]['LASTNAME'] + ', ' +
-                                         prod_analyst_df.iloc[0]['FIRSTNAME']:
-                                         prod_analyst_df.ilco[0]['EMAIL']}
-                # Add the product_analyst to the cs_team dictionary
-                self.cs_team.update(self.prod_analyst)
-        else:
-            # If the CS is not recognized, default to a blank dictionary 
-            prod_mgr = {}
-            prod_analyst = {}
+        self.CS = self.data['CS']
+        # and assign the applicable CS Contacts to this vendor.
+        self.prod_dir = self.data['CS_Contacts']['Product_Director']
+        self.CS_team.update(self.prod_dir)        
+        # Add the product_director to the CS_team dictionary
+        self.prod_mgr = self.data['CS_Contacts']['Product_Manager']
+        self.CS_team.update(self.prod_mgr)
+        self.prod_analyst = self.data['CS_Contacts']['Product_Analyst']
+        self.CS_team.update(self.prod_analyst)
     
-def create_email(self):
+    def create_email(self):
         # Creates a "To" and "Cc" list, then Creates an outlook email to the vendor.
-        prod_analyst_df = contacts.query("JCD == '{}'".format(mapping[self.cs][1]))
+        prod_analyst_df = french_master.query("CS == '{}'".format(self.CS))
+        selected_columns = prod_analyst_df[['CS','PA_FIRSTNAME','PA_LASTNAME', 'PA_EMAIL']].drop_duplicates()
         # Create a "to list" from the dataframe without duplicates      
         to_list = list(self.vendor_contacts.values())
         # Get the Product Analysts
@@ -231,15 +228,15 @@ def create_email(self):
         # Blank string for pretty names
         cc_list_pretty_names = ''
         # If there is more than one product analyst, concatenate the pretty_names and emails
-        if len(prod_analyst_df) >1:
-            for i in range(len(prod_analyst_df)):
-                cc_list_pretty_names += f"{prod_analyst_df.iloc[i]['FIRSTNAME']} {prod_analyst_df.iloc[i]['LASTNAME']} & "
-                cc_list_pretty_emails += f"{prod_analyst_df.iloc[i]['FIRSTNAME']}.{prod_analyst_df.iloc[i]['LASTNAME']}@company.com & "
+        if len(selected_columns) >1:
+            for i in range(len(selected_columns)):
+                cc_list_pretty_names += f"{selected_columns.iloc[i]['FIRSTNAME']} {selected_columns.iloc[i]['LASTNAME']} & "
+                cc_list_pretty_emails += f"{selected_columns.iloc[i]['FIRSTNAME']}.{selected_columns.iloc[i]['LASTNAME']}@company.com & "
             cc_list_pretty_names = cc_list_pretty_names[:-3] # Remove the ' & ' at the end of the last analyst
             cc_list_pretty_emails = cc_list_pretty_emails[:-3] # Remove the ' & ' at the end of the last analyst
         else:
-            cc_list_pretty_names += f"{prod_analyst_df.iloc[0]['FIRSTNAME']} {prod_analyst_df.iloc[0]['LASTNAME']}"
-            cc_list_pretty_emails += f"{prod_analyst_df.iloc[0]['FIRSTNAME']}.{prod_analyst_df.iloc[0]['LASTNAME']}@company.com"
+            cc_list_pretty_names += f"{selected_columns.iloc[0]['FIRSTNAME']} {selected_columns.iloc[0]['LASTNAME']}"
+            cc_list_pretty_emails += f"{selected_columns.iloc[0]['FIRSTNAME']}.{selected_columns.iloc[0]['LASTNAME']}@company.com"
 
         #List of CS business units
         cs_names = {
@@ -289,7 +286,7 @@ def create_email(self):
         mail = outlook.CreateItem(0)
         mail.To = str(to_w_sc)
         mail.CC = str(cc_w_sc)
-        MAIl.Subject = f"Retail Packaging Requirements for Compliance with the Charter of French Language - {self.name} {self.vendor_id} - {self.sbu}"
+        MAIl.Subject = f"Retail Packaging Requirements for Compliance with the Charter of French Language - {self.name} {self.vendor_id} - {self.cs}"
         MAIl.HTMLBody = f"""
             Good afternoon,<br><br>
             You were recently notified with the below details about updated Aftermarket Packaging 
@@ -312,7 +309,7 @@ def create_email(self):
             to the published supplier guidelines.<br><br>
 
             Please let me know if you have any questions.  Thank you for your continued support.<br>
-            <b><font color='#767171'>{cc_list_pretty_names} - Product Analyst - {sbu_names[self.sbu]} 
+            <b><font color='#767171'>{cc_list_pretty_names} - Product Analyst - {sbu_names[self.cs]} 
             | Company | Email: </font> <font color='#0563C1'></u>{cc_list_pretty_emails}</font></u></b><br>
             <img src='C:/Users/User.User/Pictures/CompanyLogo.png' width=300 height=60>
             """
@@ -335,248 +332,300 @@ def create_email(self):
         global successful
         successful += 1
         print("Moving to next vendor")
+        del prod_analyst_df
+        del slected_names
 
 def get_all_data():
     # SQL used to query snowflake data for Vendor ID, Vendor Name, Vendor Contact Name,
-    # Vendor Contact Role, Vendor Contact email, French Compliance Status, CS, 
-    #  Contact Name,  Contact email. Uses python_snowflake_connector
+    # Vendor Contact Role, Vendor Contact Email, French Compliance Status, CS, 
+    #  Contact Name,  Contact Email. Uses python_snowflake_connector
     # to create a connection and authenticate. Uses String formatting to prevent 
     # SQL injection.
-    vendor_details_sql = """WITH CTE AS (
-        SELECT DISTINCT
-            A.FIRSTNAME,
-            A.LASTNAME,
-            B.JCD,
-            A.CNTID
-        FROM 
-            DB.SCHEMA.CNT AS A
-        LEFT JOIN
-            DB.SCHEMA.ROL AS B
-        ON
-            A.CNTID = B.CNTID
-        WHERE
-            JCD IN (
-            'D10', 'D11', 'D12', 
-            'D14', 'D15', 'D16',
-            'D17', 'D18', 'D20',
-            'D21', 'D22', 'D99'
-            )
-            AND A.BECODE ILIKE 'company'
-            AND ID IS NOT NULL
-            AND PDCLOC NOT ILIKE 'WEST VIRGINIA'
-            AND ID NOT IN (
-                'A', 'B', 'C',
-                'D', 'E', 'F',
-                'G', 'H', 'I'
-                )
-            AND LASTNAME NOT ILIKE 'John'
-            AND LASTNAME NOT ILIKE 'ADAMS'
-            AND LASTNAME NOT ILIKE 'ALEXANDER'
-            AND LASTNAME NOT ILIKE 'HAMILTON'
-            AND LASTNAME NOT ILIKE 'JEFFERSON'
-            AND LASTNAME NOT ILIKE 'PAINE'
-            AND LASTNAME NOT ILIKE 'SMITH'
-            AND LASTNAME NOT ILIKE 'HANCOCK'
-            AND LASTNAME NOT ILIKE 'FRANKLIN'
-            AND LASTNAME NOT ILIKE 'FLOYD'
-            AND LASTNAME NOT ILIKE 'HALL'
-        ORDER BY
-            RIGHT(JCD,2)
+    vendor_details_sql = """
+    WITH PROD_DIR_CTE AS (
+    SELECT DISTINCT
+        A.FIRSTNAME AS PD_FIRSTNAME,
+        A.LASTNAME AS PD_LASTNAME,
+        B.JCD AS PD_JCD,
+        A.CNTID AS PD_CNTID,
+        C.EMAIL AS PD_EMAIL
+    FROM 
+        db.schema.ICNT AS A
+    LEFT JOIN
+        db.schema.SIROL AS B
+    ON
+        A.CNTID = B.CNTID
+    LEFT JOIN
+        db.schema.IEML AS C
+    ON
+        B.CNTID = C.CNTID
+    WHERE
+        PD_JCD IN (
+        'D10', 'D11', 'D12', 
+        'D14', 'D15', 'D16',
+        'D17', 'D18', 'D20',
+        'D21', 'D22', 'D99'
         )
-
-        SELECT DISTINCT
-            CONCAT(A.VNDID, A.VNDSFX) AS VENDORID,
-            B.VNDNAM,
-            A.FIRSTNAME AS VND_FIRSTNAME,
-            A.LASTNAME AS VND_LASTNAME,
-            D.ROLEDSC, 
-            C.EMAIL AS VND_EMAIL,
-            E.FRENCHCOMP,
-            F.PROD_DIR AS CS,
-            G.FIRSTNAME AS CS_FIRSTNAME,
-            G.LASTNAME AS CS_LASTNAME,
-            H.EMAIL AS CS_EMAIL
-        FROM 
-            DB.SCHEMA.CNT AS A
-        LEFT JOIN 
-            DB.SCHEMA.VNDR1 AS B
-        ON
-            CONCAT(A.VNDID, A.VNDSFX) = CONCAT(B.VNDID, B.VNDSFX)
-        LEFT JOIN 
-            DB.SCHEMA.EML AS C
-        ON 
-            A.CNTID = C.CNTID
-        LEFT JOIN
-            DB.SCHEMA.ROL AS D
-        ON
-            A.CNTID = D.CNTID
-        LEFT JOIN 
-            DB.SCHEMA.SPRF AS E
-        ON 
-            CONCAT(A.VNDID, A.VNDSFX) = CONCAT(E.VNDID, E.VNDSFX)
-        LEFT JOIN
-            DB.SCHEMA.VENDOR_MASTER AS F
-        ON
-            CONCAT(A.VNDID, A.VNDSFX) = CONCAT(F.VNDR_ID, F.VNDR_SFX)
-        LEFT JOIN
-            CTE AS G
-        ON
-            F.PROD_DIR = G.JCD
-        LEFT JOIN
-            DB.SCHEMA.EML AS H
-        ON
-            G.CNTID = H.CNTID
-        WHERE 
-            VENDORID IN (
-                SELECT CONCAT(VNDID, VNDSFX) AS VENDORID
-                FROM  DB.SCHEMA.SPRF
-                WHERE 
-                    FRENCHCOMP IS NOT NULL
-                        )
-            AND A.BETYPE ILIKE '%s' 
-            AND A.CNTTYPE IN ('%s', '%s', '%s') 
-            AND A.FIRSTNAME NOT ILIKE '%s' 
-            AND A.FIRSTNAME NOT ILIKE '%s'
-            AND A.LASTNAME NOT ILIKE '%s' 
-            AND A.LASTNAME NOT ILIKE '%s'
-            AND A.FIRSTNAME IS NOT NULL 
-            AND A.LASTNAME IS NOT NULL
-            AND B.STATIND ILIKE 'A'
-            AND D.ROLEDSC IS NOT NULL 
-            AND E.FRENCHCOMP IN ('%s', '%s', '%s')
-            AND D.ROLEDSC IN ('%s', '%s', '%s')
-        HAVING
-            length(VENDORID) > 3
-        ORDER BY 
-            VENDORID
-        ;""" % ('supplier', 'Primary', 'Secondary',
-           'individual', '%VALID%', '%?%','%VALID%', 
-           '%?%','Not Compliant', 'Infraction Logged', 
-           'Pending Review', 'Supplier Infractions Contact *', 
-           'Quality Manager', 'Account Manager *'
-           )
+        AND A.BECODE ILIKE '%s'
+        AND schemaID IS NOT NULL
+        AND PD_LASTNAME NOT ILIKE '%s'
+        AND PD_LASTNAME NOT ILIKE '%s'
+    UNION ALL
+        SELECT
+            '%s' AS PD_FIRSTNAME,
+            '%s' AS PD_LASTNAME,
+            'D16' AS PD_JCD,
+            99990 AS PD_CNTID,
+            '%s' AS PD_EMAIL
+    UNION ALL
+        SELECT
+            '%s' AS PD_FIRSTNAME,
+            '%s' AS PD_LASTNAME,
+            'D22' AS PD_JCD,
+            99990 AS PD_CNTID,
+            '%s' AS PD_EMAIL
+    ORDER BY
+        RIGHT(PD_JCD,2)
+    ), 
+    PROD_MGR_CTE AS (
+    SELECT DISTINCT
+        A.FIRSTNAME AS PM_FIRSTNAME,
+        A.LASTNAME AS PM_LASTNAME,
+        B.JCD AS PM_JCD,
+        A.CNTID AS PM_CNTID,
+        C.EMAIL AS PM_EMAIL
+    FROM 
+        db.schema.CNT AS A
+    LEFT JOIN
+        db.schema.SIROL AS B
+    ON
+        A.CNTID = B.CNTID
+    LEFT JOIN
+        db.schema.EML AS C
+    ON
+        B.CNTID = C.CNTID
+    WHERE
+        PM_JCD IN (
+        'B10', 'B11', 'B12', 
+        'B14', 'B15', 'B16',
+        'B17', 'B18', 'B20',
+        'B21', 'B22', 'B99'
+        )
+        AND A.BECODE ILIKE '%s'
+        AND schemaID IS NOT NULL
+        AND LASTNAME NOT ILIKE '%s'
+        AND LASTNAME NOT ILIKE '%s'
+        AND LASTNAME NOT ILIKE '%s'
+    ORDER BY
+        RIGHT(PM_JCD,2)
+    ), 
+    PROD_ANALYST_CTE AS (
+    SELECT DISTINCT
+        A.FIRSTNAME AS PA_FIRSTNAME,
+        A.LASTNAME AS PA_LASTNAME,
+        B.JCD AS PA_JCD,
+        A.CNTID AS PA_CNTID,
+        C.EMAIL AS PA_EMAIL
+    FROM 
+        db.schema.CNT AS A
+    LEFT JOIN
+        db.schema.SIROL AS B
+    ON
+        A.CNTID = B.CNTID
+    LEFT JOIN
+        db.schema.EML AS C
+    ON
+        B.CNTID = C.CNTID
+    WHERE
+        PA_JCD IN (
+        'M10', 'M11', 'M12', 
+        'M14', 'M15', 'M16',
+        'M17', 'M18', 'M20',
+        'M21', 'M22', 'M99'
+        )
+        AND A.BECODE ILIKE '%s'
+        AND schemaID IS NOT NULL
+        AND LASTNAME NOT ILIKE '%s'
+        AND LASTNAME NOT ILIKE '%s'
+        AND LASTNAME NOT ILIKE '%s'
+        AND LASTNAME NOT ILIKE '%s'
+        AND LASTNAME NOT ILIKE '%s'
+        AND LASTNAME NOT ILIKE '%s'
+        AND LASTNAME NOT ILIKE '%s'
+    UNION ALL
+        SELECT 
+            '%s' AS PA_FIRSTNAME, 
+            '%s' AS PA_LASTNAME,
+            'M12' AS PA_JCD, 
+            11111 AS PA_CNTID,
+            '%s' AS PA_EMAIL
+    UNION ALL
+        SELECT 
+            '%s' AS PA_FIRSTNAME,
+            '%s' AS PA_LASTNAME,
+            'M20' AS PA_JCD, 
+            11111 AS PA_CNTID,
+            '%s' AS PA_EMAIL
+    UNION ALL
+        SELECT 
+            '%s' AS PA_FIRSTNAME,  
+            '%s' AS PA_LASTNAME,
+            'M21' AS PA_JCD,
+            11111 AS PA_CNTID, 
+            '%s' AS PA_EMAIL
+    UNION ALL
+        SELECT 
+            '%s' AS PA_FIRSTNAME, 
+            '%s' AS PA_LASTNAME,
+            'M99' AS PA_JCD, 
+            11111 AS PA_CNTID, 
+            '%s' AS PA_EMAIL
+    UNION ALL
+        SELECT 
+            '%s' AS PA_FIRSTNAME,  
+            '%s' AS PA_LASTNAME,
+            'M12' AS PA_JCD, 
+            99999 AS PA_CNTID, 
+            '%s' AS PA_EMAIL
+    UNION ALL
+        SELECT 
+            '%s' AS PA_FIRSTNAME,  
+            '%s' AS PA_LASTNAME, 
+            'M20' AS PA_JCD, 
+            99999 AS PA_CNTID, 
+            '%s' AS PA_EMAIL
+    UNION ALL
+        SELECT 
+            '%s' AS PA_FIRSTNAME, 
+            '%s' AS PA_LASTNAME,
+            'M21' AS PA_JCD,
+            99999 AS PA_CNTID, 
+            '%s' AS PA_EMAIL
+    UNION ALL
+        SELECT 
+            '%s' AS PA_FIRSTNAME, 
+            '%s' AS PA_LASTNAME,
+            'M99' AS PA_JCD, 
+            99999 AS PA_CNTID, 
+            '%s' AS PA_EMAIL
+    UNION ALL
+        SELECT
+            '%s' AS PA_FIRSTNAME,
+            '%s' AS PA_LASTNAME,
+            'M22' AS PA_JCD,
+            99997 AS PA_CNTID,
+            '%s' AS PA_EMAIL
+    ORDER BY
+        RIGHT(PA_JCD,2)
+    )
+    SELECT DISTINCT
+        CONCAT(A.VNDID, A.VNDSFX) AS VENDORID,
+        B.VNDNAM,
+        A.FIRSTNAME AS VND_FIRSTNAME,
+        A.LASTNAME AS VND_LASTNAME,
+        D.ROLEDSC AS VND_ROLEDSC, 
+        C.EMAIL AS VND_EMAIL,
+        E.FRENCHCOMP,
+        F.PROD_DIR AS CS,
+        G.PD_FIRSTNAME,
+        G.PD_LASTNAME,
+        G.PD_EMAIL,
+        H.PM_FIRSTNAME,
+        H.PM_LASTNAME,
+        H.PM_EMAIL,
+        I.PA_FIRSTNAME,
+        I.PA_LASTNAME,
+        I.PA_EMAIL
+    FROM 
+        db.schema.CNT AS A
+    LEFT JOIN 
+        db.schema.VNDR1 AS B
+    ON
+        CONCAT(A.VNDID, A.VNDSFX) = CONCAT(B.VNDID, B.VNDSFX)
+    LEFT JOIN 
+        db.schema.EML AS C
+    ON 
+        A.CNTID = C.CNTID
+    LEFT JOIN
+        db.schema.SIROL AS D
+    ON
+        A.CNTID = D.CNTID
+    LEFT JOIN 
+        db.schema.SPRF AS E
+    ON 
+        CONCAT(A.VNDID, A.VNDSFX) = CONCAT(E.VNDID, E.VNDSFX)
+    LEFT JOIN
+        db.schema.VC_VENDOR_MASTER_USER_DATA AS F
+    ON
+        CONCAT(A.VNDID, A.VNDSFX) = CONCAT(F.VNDR_ID, F.VNDR_SFX)
+    LEFT JOIN
+        PROD_DIR_CTE AS G
+    ON
+        RIGHT(CS, 2) = RIGHT(PD_JCD, 2)
+    LEFT JOIN
+        PROD_MGR_CTE AS H
+    ON
+        RIGHT(CS, 2) = RIGHT(PM_JCD,2)
+    LEFT JOIN
+        PROD_ANALYST_CTE AS I
+    ON
+        RIGHT(CS, 2) = RIGHT(PA_JCD,2)
+    WHERE
+        VENDORID IN (
+            SELECT CONCAT(VNDID, VNDSFX) AS VENDORID
+            FROM  db.schema.SPRF
+            WHERE 
+                FRENCHCOMP IS NOT NULL
+                    )
+        AND A.BETYPE ILIKE '%s' 
+        AND A.CNTTYPE IN ('%s',
+                          '%s',
+                          '%s'
+                          ) 
+        AND A.FIRSTNAME NOT ILIKE '%s' 
+        AND A.FIRSTNAME NOT ILIKE '%s'
+        AND A.LASTNAME NOT ILIKE '%s' 
+        AND A.LASTNAME NOT ILIKE '%s'
+        AND A.FIRSTNAME IS NOT NULL 
+        AND A.LASTNAME IS NOT NULL
+        AND B.STATIND ILIKE 'A'
+        AND D.ROLEDSC IS NOT NULL 
+        AND E.FRENCHCOMP IN ('%s',
+                             '%s',
+                             '%s'
+                             )
+        AND D.ROLEDSC IN ('%s',
+                          '%s', 
+                          '%s'
+                          )
+    HAVING
+        length(VENDORID) > 3
+    ORDER BY 
+        VENDORID
+;
+    ;""" % ('company','Adams', 'Adams', 'Josiah', 'Bartlett', 
+            'Josiah.Bartlett@company.com', 'Josiah', 'Bartlett', 
+            'Josiah.Bartlett@company.com', 'company', 'Braxton', 
+            'Chase', 'Clark', 'company', 'Clymer', 
+            'Ellery', 'Floyd', 'Franklin', 'Gerry', 'Gwinnett', 'Hall', 
+            'John', 'Hancock', 'John.Hancock@company.com',
+            'John', 'Hancock', 'John.Hancock@company.com', 
+            'John', 'Hancock', 'John.Hancock@company.com',
+            'John', 'Hancock', 'John.Hancock@company.com', 
+            'Benjamin', 'Harrison', 'Benjamin.Harrison@company.com', 
+            'Benjamin', 'Harrison', 'Benjamin.Harrison@company.com', 
+            'Benjamin', 'Harrison', 'Benjamin.Harrison@company.com', 
+            'Benjamin', 'Harrison', 'Benjamin.Harrison@company.com', 
+            'John', 'Hart', 'John.Hart@company.com',
+            'supplier', 'Primary', 'Secondary', 'individual', 
+            '%VALID%', '%?%','%VALID%', '%?%','Not Compliant',
+            'Infraction Logged', 'Pending Review', 
+            'Supplier Infractions Contact *', 'Quality Manager',
+            'Account Manager *'
+            ) #These are names of the signers of the declaration of independence, not real names at the company today.
     # Snowflake Connection
     vendor_details = sf_connection(vendor_details_sql)
     return vendor_details
-
-def get_data():
-    # SQL used to query snowflake data for  contacts such as Product Managers and Product Analysts.
-    # Retrieves  Contact Name,  CS #, and  Contact emai. Uses python_snowflake_connector
-    # to create a connection and authenticate. Uses String formatting to prevent SQL injection. 
-    contacts_sql = """
-        SELECT DISTINCT
-            A.FIRSTNAME,
-            A.LASTNAME,
-            B.JCD,
-            A.CNTID,
-            C.EMAIL
-        FROM 
-            DB.SCHEMA.CNT AS A
-        LEFT JOIN
-            DB.SCHEMA.ROL AS B
-        ON
-            A.CNTID = B.CNTID
-        LEFT JOIN
-            DB.SCHEMA.EML AS C
-        ON
-            B.CNTID = C.CNTID
-        WHERE
-            JCD IN (
-            'D10', 'B10', 'D11', 'B11', 'D12', 
-            'B12', 'D14', 'B14', 'D15', 'B15',
-            'D16', 'B16', 'D17', 'B17', 'D18',
-            'B18', 'D20', 'B20', 'D21', 'B21',
-            'D22', 'B22', 'D99', 'B99', 'M10',
-            'M11', 'M12', 'M14', 'M15', 'M16',
-            'M17', 'M18', 'M20', 'M21', 'M22',
-            'M99'
-            )
-            AND A.BECODE ILIKE '%s'
-            AND ID IS NOT NULL
-            AND PDCLOC NOT ILIKE '%s'
-            AND ID NOT IN ('%s', '%s', '%s',
-            '%s', '%s', '%s', '%s', '%s', '%s')
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-            AND LASTNAME NOT ILIKE '%s'
-        UNION ALL
-            SELECT
-                'Pam' AS FIRSTNAME,
-                'Beesly" AS LASTNAME,
-                'M12' AS JCD,
-                11111 AS CNTID,
-                'Pam.Beesly@company.com' AS EMAIL
-        UNION ALL
-            SELECT
-                'Pam' AS FIRSTNAME,
-                'Beesly" AS LASTNAME,
-                'M20' AS JCD,
-                11111 AS CNTID,
-                'Pam.Beesly@company.com' AS EMAIL
-        UNION ALL
-            SELECT
-                'Pam' AS FIRSTNAME,
-                'Beesly" AS LASTNAME,
-                'M21' AS JCD,
-                11111 AS CNTID,
-                'Pam.Beesly@company.com' AS EMAIL
-        UNION ALL
-            SELECT
-                'Pam' AS FIRSTNAME,
-                'Beesly" AS LASTNAME,
-                'M99' AS JCD,
-                11111 AS CNTID,
-                'Pam.Beesly@company.com' AS EMAIL
-        UNION ALL
-            SELECT
-                'Michael' AS FIRSTNAME,
-                'Scott' AS LASTNAME,
-                'M12' AS JCD,
-                99999 AS CNTID,
-                'Michael.Scott@company.com' AS EMAIL
-        UNION ALL
-            SELECT
-                'Michael' AS FIRSTNAME,
-                'Scott' AS LASTNAME,
-                'M20' AS JCD,
-                99999 AS CNTID,
-                'Michael.Scott@company.com' AS EMAIL
-        UNION ALL
-            SELECT
-                'Michael' AS FIRSTNAME,
-                'Scott' AS LASTNAME,
-                'M21' AS JCD,
-                99999 AS CNTID,
-                'Michael.Scott@company.com' AS EMAIL
-        UNION ALL
-            SELECT
-                'Michael' AS FIRSTNAME,
-                'Scott' AS LASTNAME,
-                'M99' AS JCD,
-                99999 AS CNTID,
-                'Michael.Scott@company.com' AS EMAIL
-        ORDER BY
-            RIGHT(JCD,2)
-            ;""" % ('company', 'WEST VIRGINIA', 'A', 'B',
-                    'C', 'D', 'E', 'F',
-                    'G', 'H', 'I', 'John', 
-                    'ADAMS', 'ALEXANDER', 'HAMILTON', 
-                    'JEFFERSON', 'PAINE', 'SMITH', 
-                    'HANCOCK', 'FRANKLIN', 'FLOYD', 'HALL',
-                    'CHASE'
-                    )
-    # Snowflake Connection
-    contacts = sf_connection(contacts_sql)
-    return contacts
 
 def sf_connection(sql, params=None):
     # Establish the connection with Snowflake, using browser authentication.
@@ -604,31 +653,38 @@ def error_log(errors):
         ws.append([vendor_id, reason])
     wb.save('skipped_vendors.xlsx')
 
-if __name__ == '__main__':
+if __name__ == '__main__': 
     print("importing the master vendor data file")
     french_master = get_all_data()
-    print("Importing the company master data file")
-    contacts = get_data()
     print("Creating vendor objects")
     vendor_dict = {french_master.iloc[i]['VENDORID']:french_master.iloc[i][ 'VNDNAM'] for i in range(len(french_master))}
     vendor_objs = [French_Vendor(k,v) for k,v in vendor_dict.items()]
-    #For Testing
-    sample_objs = vendor_objs[0:20] # When done with testing, remove sample_objs and replace with vendor_objs
-    
-    for h, i in enumerate(sample_objs): # When done with testing, remove sample_objs and replace with vendor_objs
-        print(f"Vendor {h} of {len(sample_objs)} {(h/len(sample_objs)) * 100}% Complete") # When done with testing, remove sample_objs and replace with vendor_objs
-        print(f"Importing vendor data for {i.vendor_id}")
-        i.get_data()
-        print(f"Getting vendor contacts for {i.vendor_id}")
-        i.get_vendor_contacts()
-        print(f"Getting French Compliance Status for {i.vendor_id}")
-        i.get_frenchstatus()
-        print(f"Getting  contacts for {i.vendor_id}")
-        i.get_cs_team()
-        print(f"Generating emai to vendor {i.vendor_id}")
-        i.create_emai()
+    sample_objs = vendor_objs[0:10]
+    batch_size = 5 # Number of emails to send in each batch
+    num_vendors = len(sample_objs)
+    for start_index in range(0, num_vendors, batch_size):
+        end_index = min(start_index + batch_size, num_vendors) 
+        batch_vendors = sample_objs[start_index:end_index]
+
+# When done with testing, remove sample_objs and replace with vendor_objs
+        for h, i in enumerate(batch_vendors):
+            print(f"Vendor {total + 1} of {len(sample_objs)} {((h + 1)/len(sample_objs)) * 100:.2f}% Complete")
+            print(f"Importing vendor data for {i.vendor_id}")
+            i.get_data()
+            print(f"Getting vendor contacts for {i.vendor_id}")
+            i.get_vendor_contacts()
+            print(f"Getting French Compliance Status for {i.vendor_id}")
+            i.get_frenchstatus()
+            print(f"Getting  contacts for {i.vendor_id}")
+            i.get_CS_team()
+            print(f"Generating email to vendor {i.vendor_id}")
+            i.create_email()
+            total += 1
+        if end_index < num_vendors:
+            print("Outlook Message Rate Limit Reached. Waiting 30 seconds to resume sending after Sending Rate Resets")
+            time.sleep(31)      
     error_log(skipped_vendors)
-    print(f"Processed {total} vendors\n{duplicates} duplicate vendor contacts\n{sbu_errors} SBU errors\n{successful} Vendors emailed successfully")
+    print(f"Processed {total} vendors\n{duplicates} duplicate vendor contacts\n{CS_errors} CS errors\n{successful} Vendors emailed successfully")
 
 # Mark the end of processing time for the program.
 et = time.time()
@@ -639,4 +695,4 @@ res = et-st
 if res < 60:
     print(f'CPU execution time: {res:.4f} seconds')
 else:
-    print(f'CPU execution time: {res//60} minutes and {res%60:.4f} seconds')
+    print(f'CPU execution time: {res//60} minutes and {res%60:.3f} seconds')
