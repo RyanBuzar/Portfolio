@@ -10,8 +10,8 @@ contributors. The developer doesnot grant reciprocal copyright permission to any
 right to seek the advice of legal counsel before entering into any such agreements.
 
 **Program Functionality:**
-Takes several excel files and consolidates them into a single dataframe. Can either upload the table to a snowflake 
-table or export the data in equally sized csv files for backup or use by other users that do not have snowflake access.
+Takes several excel files and consolidates them into a single dataframe. Can either upload the dataframe directly to a snowflake 
+table or export the data in equally sized csv files for backup or use by other users that do not have snowflake access and then upload to snowflake table.
 
 **Suggestions?**
 If you have any suggestions that may improve the performance, readability, security of the code. Please do not hesitate to reach out with suggestions.
